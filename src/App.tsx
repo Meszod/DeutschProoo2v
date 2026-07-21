@@ -1,12 +1,9 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import Layout from '@/components/Layout';
-import { ProtectedRoute, AdminRoute } from '@/components/ProtectedRoute';
-import Landing from '@/pages/Landing';
 import Auth from '@/pages/Auth';
-import Onboarding from '@/pages/Onboarding';
+import Landing from '@/pages/Landing';
 import Dashboard from '@/pages/Dashboard';
 import Lesen from '@/pages/Lesen';
 import Hoeren from '@/pages/Hoeren';
@@ -17,62 +14,69 @@ import Grammar from '@/pages/Grammar';
 import MockExam from '@/pages/MockExam';
 import Leaderboard from '@/pages/Leaderboard';
 import Profile from '@/pages/Profile';
+import Onboarding from '@/pages/Onboarding';
 import Admin from '@/pages/Admin';
 
-function App() {
-  const { setSession, setProfile, setLoading } = useStore();
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useStore();
+  if (!user) return <Navigate to="/auth" replace />;
+  return <>{children}</>;
+}
+
+function AppRoutes() {
+  const { setSession, setProfile, session } = useStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Get initial session
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      if (session?.user) {
-        const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-        setProfile(data);
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        setSession(data.session);
+        supabase.from('profiles').select('*').eq('id', data.session.user.id).maybeSingle().then(({ data: p }) => setProfile(p));
       }
-      setLoading(false);
-    })();
+    });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       (async () => {
         setSession(session);
         if (session?.user) {
-          const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-          setProfile(data);
+          const { data: p } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+          setProfile(p);
         } else {
           setProfile(null);
+          if (event === 'SIGNED_OUT') navigate('/');
         }
-        setLoading(false);
       })();
     });
 
-    return () => subscription.unsubscribe();
-  }, [setSession, setProfile, setLoading]);
+    return () => authListener.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/auth/login" element={<Auth mode="login" />} />
-        <Route path="/auth/signup" element={<Auth mode="signup" />} />
-        <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
-        <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
-        <Route path="/lesen" element={<ProtectedRoute><Layout><Lesen /></Layout></ProtectedRoute>} />
-        <Route path="/hoeren" element={<ProtectedRoute><Layout><Hoeren /></Layout></ProtectedRoute>} />
-        <Route path="/schreiben" element={<ProtectedRoute><Layout><Schreiben /></Layout></ProtectedRoute>} />
-        <Route path="/sprechen" element={<ProtectedRoute><Layout><Sprechen /></Layout></ProtectedRoute>} />
-        <Route path="/vocabulary" element={<ProtectedRoute><Layout><Vocabulary /></Layout></ProtectedRoute>} />
-        <Route path="/grammar" element={<ProtectedRoute><Layout><Grammar /></Layout></ProtectedRoute>} />
-        <Route path="/mock-exam" element={<ProtectedRoute><Layout><MockExam /></Layout></ProtectedRoute>} />
-        <Route path="/leaderboard" element={<ProtectedRoute><Layout><Leaderboard /></Layout></ProtectedRoute>} />
-        <Route path="/profile" element={<ProtectedRoute><Layout><Profile /></Layout></ProtectedRoute>} />
-        <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/auth" element={<Auth />} />
+      <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
+      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/lesen" element={<ProtectedRoute><Lesen /></ProtectedRoute>} />
+      <Route path="/hoeren" element={<ProtectedRoute><Hoeren /></ProtectedRoute>} />
+      <Route path="/schreiben" element={<ProtectedRoute><Schreiben /></ProtectedRoute>} />
+      <Route path="/sprechen" element={<ProtectedRoute><Sprechen /></ProtectedRoute>} />
+      <Route path="/vocabulary" element={<ProtectedRoute><Vocabulary /></ProtectedRoute>} />
+      <Route path="/grammar" element={<ProtectedRoute><Grammar /></ProtectedRoute>} />
+      <Route path="/mock-exam" element={<ProtectedRoute><MockExam /></ProtectedRoute>} />
+      <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
+      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
+  );
+}

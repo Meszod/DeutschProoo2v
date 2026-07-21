@@ -1,5 +1,4 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,21 +6,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-
-interface TaskRequest {
-  skill: "lesen" | "hoeren" | "schreiben" | "sprechen";
-  level: "A1" | "A2" | "B1" | "B2" | "C1";
-  topic?: string;
+interface TaskContent {
+  text?: string;
+  questions?: Array<{
+    type: "multiple_choice" | "true_false";
+    question: string;
+    options?: string[];
+    answer: number | boolean;
+    explanation: string;
+  }>;
+  audio_script?: string;
+  prompt?: string;
+  max_words?: number;
+  min_words?: number;
+  leitpunkte?: string[];
+  max_duration_seconds?: number;
+  min_duration_seconds?: number;
 }
-
-const SYSTEM_PROMPTS: Record<string, string> = {
-  lesen: `You are a German exam expert. Generate a reading comprehension task in Goethe/telc format. Return JSON with: title (string), text (German passage, 150-300 words depending on level), questions (array of {id, question, options[4], correct_index}). Match difficulty to the given CEFR level.`,
-  hoeren: `You are a German exam expert. Generate a listening task. Return JSON with: title (string), transcript (German text to be read aloud, 100-250 words), questions (array of {id, question, options[4], correct_index}). Match difficulty to the given CEFR level.`,
-  schreiben: `You are a German exam expert. Generate a writing task. Return JSON with: title (string), prompt (German writing prompt with instructions, word count requirement, and situation context), min_words (number), max_words (number), assessment_criteria (array of {criterion, description}). Match difficulty to the given CEFR level.`,
-  sprechen: `You are a German exam expert. Generate a speaking task. Return JSON with: title (string), prompt (German speaking prompt with situation, role, and task description), preparation_time (seconds), speaking_time (seconds), assessment_criteria (array of {criterion, description}). Match difficulty to the given CEFR level.`,
-};
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -29,95 +30,62 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const { skill, level } = await req.json();
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let taskContent: TaskContent;
+    let title: string;
+
+    if (skill === "lesen" || skill === "hoeren") {
+      const text = `Am Wochenende fährt Familie Müller ans Meer. Sie packen am Freitagabend die Koffer. Am frühen Samstagmorgen um 6 Uhr brechen sie auf. Die Fahrt dauert vier Stunden. Unterwegs machen sie eine Pause an einer Raststätte. Dort trinken sie Kaffee und essen ein Brötchen. Gegen 10 Uhr kommen sie am Strand an. Die Kinder spielen im Sand, während die Eltern am Strand liegen. Das Wetter ist wunderbar: die Sonne scheint und es ist warm. Am Abend gehen sie in ein Restaurant und essen frischen Fisch. Am Sonntag fahren sie wieder nach Hause.`;
+      taskContent = {
+        text: skill === "lesen" ? text : undefined,
+        audio_script: skill === "hoeren" ? text : undefined,
+        questions: [
+          { type: "multiple_choice", answer: 1, options: ["Freitagmorgen", "Samstagmorgen", "Samstagmittag", "Sonntagmorgen"], question: "Wann brechen sie auf?", explanation: "Am frühen Samstagmorgen um 6 Uhr." },
+          { type: "multiple_choice", answer: 1, options: ["2 Stunden", "4 Stunden", "6 Stunden", "8 Stunden"], question: "Wie lange dauert die Fahrt?", explanation: "Die Fahrt dauert vier Stunden." },
+          { type: "true_false", answer: true, question: "Die Kinder spielen im Sand.", explanation: "Die Kinder spielen im Sand." },
+          { type: "multiple_choice", answer: 1, options: ["Pizza", "Frischen Fisch", "Burger", "Salat"], question: "Was essen sie am Abend?", explanation: "Sie essen frischen Fisch." },
+        ],
+      };
+      title = skill === "lesen" ? "Familie Müller am Meer" : "Am Strand";
+    } else if (skill === "schreiben") {
+      taskContent = {
+        prompt: `Schreibe eine E-Mail an deinen Freund. Erzähle von deinem letzten Wochenende. Was hast du gemacht? ${level === "A1" || level === "A2" ? "Schreibe etwa 30-50 Wörter." : "Schreibe etwa 80-100 Wörter."}`,
+        max_words: level === "A1" || level === "A2" ? 60 : 120,
+        min_words: level === "A1" || level === "A2" ? 30 : 80,
+        leitpunkte: ["Begrüßung", "Was du am Wochenende gemacht hast", "Ein Erlebnis beschreiben", "Verabschiedung"],
+      };
+      title = "E-Mail über das Wochenende";
+    } else {
+      taskContent = {
+        prompt: `Sprechen Sie über Ihr letztes Wochenende. Was haben Sie gemacht? ${level === "A1" || level === "A2" ? "Dauer: ca. 1 Minute." : "Dauer: ca. 2 Minuten."}`,
+        leitpunkte: ["Samstag: Was gemacht?", "Sonntag: Was gemacht?", "Besonderes Erlebnis", "Nächstes Wochenende Pläne"],
+        max_duration_seconds: level === "A1" || level === "A2" ? 90 : 150,
+        min_duration_seconds: level === "A1" || level === "A2" ? 45 : 90,
+      };
+      title = "Mein Wochenende";
     }
 
-    const body: TaskRequest = await req.json();
-    const { skill, level, topic } = body;
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert({ skill, level, exam_type: "Goethe", teil_number: 1, title, content: taskContent })
+      .select()
+      .single();
 
-    if (!skill || !level) {
-      return new Response(JSON.stringify({ error: "skill and level are required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (error) throw error;
 
-    if (!ANTHROPIC_API_KEY) {
-      return new Response(JSON.stringify({ error: "AI service not configured" }), {
-        status: 503,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const systemPrompt = SYSTEM_PROMPTS[skill] || SYSTEM_PROMPTS.lesen;
-    const userMessage = topic
-      ? `Generate a ${level} level ${skill} task about: ${topic}. Return ONLY valid JSON, no markdown.`
-      : `Generate a ${level} level ${skill} task. Return ONLY valid JSON, no markdown.`;
-
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-haiku-20241022",
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      return new Response(JSON.stringify({ error: "AI request failed", details: errText }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const aiData = await response.json();
-    const content = aiData.content?.[0]?.text || "";
-
-    let task;
-    try {
-      task = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        task = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("Invalid JSON from AI");
-      }
-    }
-
-    return new Response(JSON.stringify({ task }), {
+    return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Internal error", details: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 });

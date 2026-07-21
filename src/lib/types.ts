@@ -1,6 +1,8 @@
 export type Level = 'A1' | 'A2' | 'B1' | 'B2' | 'C1';
 export type Skill = 'lesen' | 'hoeren' | 'schreiben' | 'sprechen';
 export type ExamType = 'Goethe' | 'telc' | 'OSD';
+export type Lang = 'uz' | 'ru' | 'en';
+export type UserRole = 'user' | 'admin';
 
 export interface Profile {
   id: string;
@@ -12,9 +14,29 @@ export interface Profile {
   longest_streak: number;
   last_activity_date: string | null;
   total_points: number;
-  role: 'user' | 'admin';
+  role: UserRole;
   placement_level: Level | null;
   created_at: string;
+}
+
+export interface TaskQuestion {
+  type: 'multiple_choice' | 'true_false';
+  question: string;
+  options?: string[];
+  answer: number | boolean;
+  explanation: string;
+}
+
+export interface TaskContent {
+  text?: string;
+  questions?: TaskQuestion[];
+  audio_script?: string;
+  prompt?: string;
+  max_words?: number;
+  min_words?: number;
+  leitpunkte?: string[];
+  max_duration_seconds?: number;
+  min_duration_seconds?: number;
 }
 
 export interface Task {
@@ -28,57 +50,19 @@ export interface Task {
   created_at: string;
 }
 
-export interface TaskContent {
-  text?: string;
-  audio_script?: string;
-  prompt?: string;
-  leitpunkte?: string[];
-  min_words?: number;
-  max_words?: number;
-  min_duration_seconds?: number;
-  max_duration_seconds?: number;
-  questions?: Question[];
-}
-
-export interface Question {
-  type: 'multiple_choice' | 'true_false' | 'matching';
-  question: string;
-  options?: string[];
-  answer: number | boolean | string;
-  explanation?: string;
-}
-
 export interface Attempt {
   id: string;
   user_id: string;
   skill: Skill;
-  level: string | null;
+  level: Level | null;
   task_id: string | null;
   score: number | null;
   max_score: number | null;
-  ai_feedback: AIFeedback | null;
+  ai_feedback: Record<string, unknown> | null;
   user_input: string | null;
   audio_url: string | null;
   duration_seconds: number | null;
   created_at: string;
-}
-
-export interface AIFeedback {
-  total_score?: number;
-  criteria?: {
-    aufgabenerfullung?: number;
-    wortschatz?: number;
-    grammatik?: number;
-    aufbau_koharenz?: number;
-  };
-  errors?: Array<{
-    error: string;
-    explanation: string;
-    correction: string;
-  }>;
-  summary?: string;
-  strengths?: string[];
-  improvements?: string[];
 }
 
 export interface VocabCard {
@@ -94,18 +78,11 @@ export interface VocabCard {
   created_at: string;
 }
 
-export interface Achievement {
-  id: string;
-  user_id: string;
-  badge_code: string;
-  earned_at: string;
-}
-
 export interface MockExam {
   id: string;
   user_id: string;
-  level: string;
-  exam_type: string | null;
+  level: Level;
+  exam_type: ExamType | null;
   lesen_score: number | null;
   hoeren_score: number | null;
   schreiben_score: number | null;
@@ -113,6 +90,14 @@ export interface MockExam {
   total_score: number | null;
   passed: boolean | null;
   created_at: string;
+}
+
+export interface LeaderboardEntry {
+  user_id: string;
+  full_name: string | null;
+  total_points: number;
+  week_start: string;
+  updated_at: string;
 }
 
 export interface DailyWord {
@@ -124,10 +109,9 @@ export interface DailyWord {
   level: Level | null;
 }
 
-export interface LeaderboardEntry {
+export interface Achievement {
+  id: string;
   user_id: string;
-  full_name: string | null;
-  total_points: number;
-  week_start: string;
-  updated_at: string;
+  badge_code: string;
+  earned_at: string;
 }

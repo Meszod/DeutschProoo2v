@@ -1,42 +1,41 @@
 import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
-import type { Profile } from './types';
-import { translations, type TranslationKey, type Lang } from './i18n';
 import { supabase } from './supabase';
+import { translate } from './i18n';
+import type { Profile, Lang } from './types';
 
-interface AppState {
-  session: Session | null;
+interface StoreState {
   user: User | null;
+  session: Session | null;
   profile: Profile | null;
   lang: Lang;
-  loading: boolean;
-  setSession: (s: Session | null) => void;
-  setProfile: (p: Profile | null) => void;
-  setLang: (l: Lang) => void;
-  setLoading: (b: boolean) => void;
+  t: (key: string) => string;
+  setSession: (session: Session | null) => void;
+  setProfile: (profile: Profile | null) => void;
+  setLang: (lang: Lang) => void;
   signOut: () => Promise<void>;
-  t: (key: TranslationKey) => string;
 }
 
-export const useStore = create<AppState>((set, get) => ({
-  session: null,
+function getInitialLang(): Lang {
+  const saved = localStorage.getItem('lang');
+  if (saved === 'uz' || saved === 'ru' || saved === 'en') return saved;
+  return 'uz';
+}
+
+export const useStore = create<StoreState>((set, get) => ({
   user: null,
+  session: null,
   profile: null,
-  lang: (localStorage.getItem('lang') as Lang) || 'uz',
-  loading: true,
-  setSession: (s) => set({ session: s, user: s?.user ?? null }),
-  setProfile: (p) => set({ profile: p }),
-  setLang: (l) => {
-    localStorage.setItem('lang', l);
-    set({ lang: l });
+  lang: getInitialLang(),
+  t: (key: string) => translate(get().lang, key),
+  setSession: (session) => set({ session, user: session?.user ?? null }),
+  setProfile: (profile) => set({ profile }),
+  setLang: (lang) => {
+    localStorage.setItem('lang', lang);
+    set({ lang });
   },
-  setLoading: (b) => set({ loading: b }),
   signOut: async () => {
     await supabase.auth.signOut();
     set({ session: null, user: null, profile: null });
-  },
-  t: (key) => {
-    const lang = get().lang;
-    return translations[lang][key] || translations.uz[key] || key;
   },
 }));

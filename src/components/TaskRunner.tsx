@@ -1,360 +1,253 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import type { Task, Question } from '@/lib/types';
+import type { Task, Attempt } from '@/lib/types';
+import { Check, X, ArrowRight, Clock, Mic, Square, Play, RotateCcw, AlertCircle } from 'lucide-react';
 import { formatTime } from '@/lib/helpers';
-import { Play, Pause, Volume2, Check, X, Clock, ArrowRight, RotateCcw, BookOpen, Headphones } from 'lucide-react';
 
 interface Props {
   task: Task;
   mode: 'lesen' | 'hoeren';
-  onComplete?: (scorePct: number) => void;
   isMock?: boolean;
+  onComplete?: (scorePct: number) => void;
 }
 
-const ACCENT = '#0ea5e9';
-
-export default function TaskRunner({ task, mode, onComplete, isMock }: Props) {
+export default function TaskRunner({ task, mode, isMock, onComplete }: Props) {
   const { t, user } = useStore();
-  const [phase, setPhase] = useState<'active' | 'result'>('active');
   const [answers, setAnswers] = useState<Record<number, number | boolean>>({});
-  const [timeLeft, setTimeLeft] = useState(task.content.questions ? task.content.questions.length * 60 : 300);
-  const [listening, setListening] = useState(false);
-  const [listenCount, setListenCount] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const [score, setScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [recording, setRecording] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const utterRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const questions = task.content.questions || [];
-  const isHoeren = mode === 'hoeren';
-  const maxListen = 2;
+  const maxScore = questions.length || 1;
 
   useEffect(() => {
-    if (phase === 'active' && !isMock) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current!);
-            handleSubmit();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (utterRef.current) window.speechSynthesis.cancel();
-    };
+    const limit = isMock ? 300 : 180;
+    setTimeLeft(limit);
+    timerRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          handleSubmit();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  }, []);
 
-  function speakText() {
-    if (!task.content.audio_script) return;
-    window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(task.content.audio_script);
-    utter.lang = 'de-DE';
-    utter.rate = 0.9;
-    const voices = window.speechSynthesis.getVoices();
-    const deVoice = voices.find((v) => v.lang.startsWith('de'));
-    if (deVoice) utter.voice = deVoice;
-    utter.onstart = () => setListening(true);
-    utter.onend = () => setListening(false);
-    utterRef.current = utter;
-    window.speechSynthesis.speak(utter);
-    setListenCount((c) => c + 1);
-  }
-
-  function stopSpeaking() {
-    window.speechSynthesis.cancel();
-    setListening(false);
-  }
-
-  function selectAnswer(qIdx: number, val: number | boolean) {
-    setAnswers((prev) => ({ ...prev, [qIdx]: val }));
+  function setAnswer(idx: number, val: number | boolean) {
+    setAnswers((prev) => ({ ...prev, [idx]: val }));
   }
 
   async function handleSubmit() {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (utterRef.current) window.speechSynthesis.cancel();
+    if (submitted) return;
     setSubmitting(true);
-
+    if (timerRef.current) clearInterval(timerRef.current);
     let correct = 0;
     questions.forEach((q, i) => {
-      const userAns = answers[i];
-      if (q.type === 'true_false') {
-        if (userAns === q.answer) correct++;
-      } else if (q.type === 'multiple_choice' && typeof userAns === 'number') {
-        if (userAns === q.answer) correct++;
-      }
+      if (answers[i] !== undefined && answers[i] === q.answer) correct++;
     });
-
-    const score = correct;
-    const maxScore = questions.length;
-    const scorePct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
-
+    setScore(correct);
+    setSubmitted(true);
+    const scorePct = Math.round((correct / maxScore) * 100);
     if (user && !isMock) {
-      try {
-        await supabase.from('attempts').insert({
-          skill: mode,
-          level: task.level,
-          task_id: task.id,
-          score,
-          max_score: maxScore,
-          duration_seconds: (task.content.questions ? task.content.questions.length * 60 : 300) - timeLeft,
-        });
-        await supabase.rpc('record_activity', { p_points: score * 5 });
-      } catch (err) {
-        console.error(err);
-      }
+      const attempt: Partial<Attempt> = {
+        user_id: user.id,
+        skill: task.skill,
+        level: task.level,
+        task_id: task.id,
+        score: correct,
+        max_score: maxScore,
+      };
+      await supabase.from('attempts').insert(attempt);
+      await supabase.rpc('record_activity', { p_points: correct * 2 });
     }
-
+    setShowFeedback(true);
     setSubmitting(false);
-    setPhase('result');
     onComplete?.(scorePct);
   }
 
-  if (phase === 'result') {
-    let correct = 0;
-    questions.forEach((q, i) => {
-      const userAns = answers[i];
-      if (q.type === 'true_false' && userAns === q.answer) correct++;
-      else if (q.type === 'multiple_choice' && userAns === q.answer) correct++;
-    });
-    const pct = Math.round((correct / questions.length) * 100);
-    const passed = pct >= 60;
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+        if (user && !isMock) {
+          const fileName = `${user.id}/${task.id}-${Date.now()}.webm`;
+          await supabase.storage.from('audio-recordings').upload(fileName, blob);
+          const { data: urlData } = supabase.storage.from('audio-recordings').getPublicUrl(fileName);
+          const { data: transcriptData } = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe-speech`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+            body: JSON.stringify({ audioUrl: urlData.publicUrl }),
+          }).then((r) => r.json()).catch(() => ({ data: null }));
+          await supabase.from('attempts').insert({
+            user_id: user.id, skill: task.skill, level: task.level, task_id: task.id,
+            audio_url: urlData.publicUrl, ai_feedback: transcriptData,
+          });
+          await supabase.rpc('record_activity', { p_points: 5 });
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch {
+      alert(t('micPermission'));
+    }
+  }
 
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  }
+
+  if (mode === 'lesen' || mode === 'hoeren') {
     return (
-      <div className="space-y-4 animate-fade-in">
-        <div className="card p-8 text-center relative overflow-hidden animate-scale-in">
-          <div className={`absolute -top-12 left-1/2 -translate-x-1/2 w-40 h-40 rounded-full blur-3xl opacity-30 ${passed ? 'bg-emerald-300' : 'bg-red-300'}`} />
-          <div className={`relative w-24 h-24 rounded-full mx-auto flex items-center justify-center mb-4 ${
-            passed ? 'bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-lg shadow-emerald-500/30' : 'bg-gradient-to-br from-red-400 to-rose-500 text-white shadow-lg shadow-red-500/30'
-          }`}>
-            <span className="text-3xl font-bold">{pct}%</span>
+      <div className="space-y-5">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <span className="badge bg-slate-100 text-slate-600">{task.level}</span>
+            {task.teil_number && <span className="text-xs text-slate-400">Teil {task.teil_number}</span>}
           </div>
-          <h2 className="text-xl font-bold text-slate-900">{correct} / {questions.length}</h2>
-          <p className="text-slate-500 text-sm mt-1">{t('score')}</p>
+          <div className="flex items-center gap-2 text-sm">
+            <Clock className="w-4 h-4 text-slate-400" />
+            <span className={`font-mono font-semibold ${timeLeft < 30 ? 'text-red-500' : 'text-slate-600'}`}>{formatTime(timeLeft)}</span>
+          </div>
         </div>
 
-        {questions.map((q, qIdx) => {
-          const userAns = answers[qIdx];
-          const isCorrect = userAns === q.answer;
-          return (
-            <div key={qIdx} className="card p-5 animate-slide-up" style={{ animationDelay: `${qIdx * 0.05}s` }}>
-              <div className="flex items-start gap-3 mb-3">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                  isCorrect ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-500'
-                }`}>
-                  {isCorrect ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-                </div>
-                <p className="font-medium text-slate-900 flex-1 pt-0.5">{q.question}</p>
-              </div>
-              <div className="ml-10 space-y-1.5 text-sm">
-                {q.type === 'multiple_choice' && q.options?.map((opt, oIdx) => (
-                  <div
-                    key={oIdx}
-                    className={`px-3 py-2 rounded-lg transition-colors ${
-                      oIdx === q.answer
-                        ? 'bg-emerald-50 text-emerald-700 font-medium'
-                        : oIdx === userAns
-                        ? 'bg-red-50 text-red-600'
-                        : 'text-slate-500'
-                    }`}
-                  >
-                    {opt} {oIdx === q.answer && '✓'} {oIdx === userAns && oIdx !== q.answer && '✗'}
-                  </div>
-                ))}
-                {q.type === 'true_false' && (
-                  <div className="flex gap-3">
-                    <span className={userAns === true ? (q.answer === true ? 'text-emerald-600 font-medium' : 'text-red-600') : 'text-slate-500'}>
-                      Richtig {q.answer === true && '✓'}
-                    </span>
-                    <span className={userAns === false ? (q.answer === false ? 'text-emerald-600 font-medium' : 'text-red-600') : 'text-slate-500'}>
-                      Falsch {q.answer === false && '✓'}
-                    </span>
-                  </div>
-                )}
-                {q.explanation && (
-                  <p className="text-xs text-slate-400 mt-2 italic border-l-2 border-slate-200 pl-2">{q.explanation}</p>
-                )}
-              </div>
+        <div className="card p-6">
+          <h2 className="font-display text-xl font-bold text-slate-900 mb-4">{task.title}</h2>
+          {mode === 'lesen' && task.content.text && (
+            <div className="prose prose-slate max-w-none mb-6">
+              <p className="text-slate-700 leading-relaxed whitespace-pre-line">{task.content.text}</p>
             </div>
-          );
-        })}
+          )}
+          {mode === 'hoeren' && task.content.audio_script && (
+            <div className="mb-6 p-4 rounded-xl bg-violet-50 border border-violet-100">
+              <p className="text-sm text-violet-600 font-medium mb-2">Audio skript (mock):</p>
+              <p className="text-slate-700 leading-relaxed">{task.content.audio_script}</p>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {questions.map((q, i) => (
+              <div key={i} className="border border-slate-200 rounded-xl p-4">
+                <p className="font-medium text-slate-900 mb-3">{i + 1}. {q.question}</p>
+                {q.type === 'multiple_choice' && q.options && (
+                  <div className="space-y-2">
+                    {q.options.map((opt, j) => {
+                      let style = 'border-slate-200 hover:border-slate-300 text-slate-700';
+                      if (submitted) {
+                        if (j === q.answer) style = 'border-emerald-500 bg-emerald-50 text-emerald-700';
+                        else if (answers[i] === j) style = 'border-red-500 bg-red-50 text-red-600';
+                        else style = 'border-slate-200 text-slate-400';
+                      } else if (answers[i] === j) {
+                        style = 'border-brand-500 bg-brand-50 text-brand-700';
+                      }
+                      return (
+                        <button key={j} disabled={submitted} onClick={() => setAnswer(i, j)} className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all text-sm font-medium ${style}`}>
+                          <span className="flex items-center justify-between">{opt}{submitted && j === q.answer && <Check className="w-4 h-4" />}{submitted && answers[i] === j && j !== q.answer && <X className="w-4 h-4" />}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {q.type === 'true_false' && (
+                  <div className="flex gap-2">
+                    {[true, false].map((val) => {
+                      let style = 'border-slate-200 text-slate-700';
+                      if (submitted) {
+                        if (val === q.answer) style = 'border-emerald-500 bg-emerald-50 text-emerald-700';
+                        else if (answers[i] === val) style = 'border-red-500 bg-red-50 text-red-600';
+                      } else if (answers[i] === val) style = 'border-brand-500 bg-brand-50 text-brand-700';
+                      return (
+                        <button key={String(val)} disabled={submitted} onClick={() => setAnswer(i, val)} className={`flex-1 px-4 py-2.5 rounded-lg border transition-all text-sm font-medium ${style}`}>
+                          {val ? 'Richtig' : 'Falsch'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {submitted && <p className="text-xs text-slate-500 mt-2 italic">{q.explanation}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {!submitted ? (
+          <button onClick={handleSubmit} disabled={submitting || Object.keys(answers).length < questions.length} className="btn-primary w-full">
+            {t('submit')} <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : showFeedback && (
+          <div className="card p-6 text-center animate-scale-in">
+            <p className="text-3xl font-bold text-slate-900">{score} / {maxScore}</p>
+            <p className="text-slate-500 mt-1">{t('score')}</p>
+          </div>
+        )}
       </div>
     );
   }
 
+  // Sprechen mode (audio recording)
   return (
-    <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3 animate-slide-down">
-        <div>
-          <h2 className="font-display text-xl font-bold text-slate-900">{task.title}</h2>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="badge" style={{ background: `${ACCENT}15`, color: ACCENT }}>{task.level}</span>
-            {task.exam_type && <span className="badge bg-slate-100 text-slate-600">{task.exam_type}</span>}
-            {task.teil_number && <span className="badge bg-slate-100 text-slate-600">Teil {task.teil_number}</span>}
-          </div>
-        </div>
-        {!isMock && (
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
-            <Clock className="w-4 h-4" />
-            {formatTime(timeLeft)}
+    <div className="space-y-5">
+      <div className="card p-6">
+        <h2 className="font-display text-xl font-bold text-slate-900 mb-4">{task.title}</h2>
+        <p className="text-slate-700 leading-relaxed mb-4">{task.content.prompt}</p>
+        {task.content.leitpunkte && (
+          <div className="mb-6">
+            <p className="text-sm font-semibold text-slate-700 mb-2">{t('leitpunkte')}:</p>
+            <ul className="space-y-1.5">
+              {task.content.leitpunkte.map((lp, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-600"><span className="font-bold text-brand-500">•</span>{lp}</li>
+              ))}
+            </ul>
           </div>
         )}
       </div>
 
-      {/* Hören audio */}
-      {isHoeren && task.content.audio_script && (
-        <div className="card p-6 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${ACCENT}08, transparent)` }}>
-          <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full blur-3xl opacity-20" style={{ background: ACCENT }} />
-          <div className="flex items-center justify-between flex-wrap gap-3 relative">
-            <div className="flex items-center gap-2 text-slate-700">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: `${ACCENT}15` }}>
-                <Volume2 className="w-5 h-5" style={{ color: ACCENT }} />
-              </div>
-              <span className="font-medium">{t('listen')}</span>
+      <div className="card p-8 text-center">
+        {!recording && !audioUrl && (
+          <button onClick={startRecording} className="inline-flex flex-col items-center gap-3 group">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 text-white flex items-center justify-center shadow-lg shadow-brand-500/30 group-hover:scale-110 transition-transform">
+              <Mic className="w-8 h-8" />
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-500">
-                {t('attemptsLeft')}: {maxListen - listenCount}/{maxListen}
-              </span>
-              {!listening ? (
-                <button
-                  onClick={speakText}
-                  disabled={listenCount >= maxListen}
-                  className="btn-primary"
-                >
-                  <Play className="w-4 h-4" />
-                  {listenCount === 0 ? t('listen') : t('listenAgain')}
-                </button>
-              ) : (
-                <button onClick={stopSpeaking} className="btn-secondary">
-                  <Pause className="w-4 h-4" />
-                  {t('stop')}
-                </button>
-              )}
-            </div>
-          </div>
-          {listenCount === 0 && (
-            <p className="text-sm text-slate-400 mt-3 relative">
-              {t('listen')} (max {maxListen}x)
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Lesen text */}
-      {!isHoeren && task.content.text && (
-        <div className="card p-6 animate-slide-up">
-          <div className="flex items-center gap-2 mb-3">
-            <BookOpen className="w-4 h-4 text-slate-400" />
-            <span className="text-sm font-medium text-slate-500">{t('lesen')}</span>
-          </div>
-          <p className="text-slate-700 leading-relaxed whitespace-pre-line">{task.content.text}</p>
-        </div>
-      )}
-
-      {/* Questions */}
-      <div className="space-y-4">
-        {questions.map((q, qIdx) => (
-          <QuestionCard
-            key={qIdx}
-            q={q}
-            qIdx={qIdx}
-            selected={answers[qIdx]}
-            onSelect={(val) => selectAnswer(qIdx, val)}
-          />
-        ))}
-      </div>
-
-      <button
-        onClick={handleSubmit}
-        disabled={submitting || Object.keys(answers).length < questions.length}
-        className="btn-primary w-full py-3 text-base"
-      >
-        {submitting ? (
-          <>
-            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            {t('loading')}
-          </>
-        ) : (
-          <>
-            {t('submit')}
-            <ArrowRight className="w-4 h-4" />
-          </>
+            <span className="text-sm font-medium text-slate-600">{t('record')}</span>
+          </button>
         )}
-      </button>
-    </div>
-  );
-}
-
-function QuestionCard({
-  q,
-  qIdx,
-  selected,
-  onSelect,
-}: {
-  q: Question;
-  qIdx: number;
-  selected: number | boolean | undefined;
-  onSelect: (val: number | boolean) => void;
-}) {
-  const { t } = useStore();
-  return (
-    <div className="card p-5 animate-slide-up" style={{ animationDelay: `${qIdx * 0.05}s` }}>
-      <p className="font-medium text-slate-900 mb-3">
-        <span className="text-slate-400 mr-2">{qIdx + 1}.</span>
-        {q.question}
-      </p>
-      {q.type === 'multiple_choice' && q.options && (
-        <div className="space-y-2">
-          {q.options.map((opt, oIdx) => (
-            <button
-              key={oIdx}
-              onClick={() => onSelect(oIdx)}
-              className={`w-full text-left px-4 py-2.5 rounded-xl border transition-all text-sm flex items-center gap-3 group ${
-                selected === oIdx
-                  ? 'border-brand-500 bg-brand-50 text-brand-700 font-medium shadow-sm'
-                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
-              }`}
-            >
-              <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                selected === oIdx ? 'border-brand-500 bg-brand-500' : 'border-slate-300 group-hover:border-slate-400'
-              }`}>
-                {selected === oIdx && <Check className="w-3 h-3 text-white" />}
-              </span>
-              {opt}
-            </button>
-          ))}
-        </div>
-      )}
-      {q.type === 'true_false' && (
-        <div className="flex gap-3">
-          <button
-            onClick={() => onSelect(true)}
-            className={`flex-1 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-              selected === true
-                ? 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm'
-                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
-            }`}
-          >
-            Richtig
+        {recording && (
+          <button onClick={stopRecording} className="inline-flex flex-col items-center gap-3 group">
+            <div className="w-20 h-20 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-500/30 animate-pulse">
+              <Square className="w-8 h-8" />
+            </div>
+            <span className="text-sm font-medium text-red-500">{t('recording')}</span>
           </button>
-          <button
-            onClick={() => onSelect(false)}
-            className={`flex-1 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-              selected === false
-                ? 'border-red-500 bg-red-50 text-red-700 shadow-sm'
-                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
-            }`}
-          >
-            Falsch
-          </button>
-        </div>
-      )}
+        )}
+        {audioUrl && !recording && (
+          <div className="space-y-4">
+            <audio controls src={audioUrl} className="w-full" />
+            <div className="flex gap-2 justify-center">
+              <button onClick={() => { setAudioUrl(null); }} className="btn-secondary"><RotateCcw className="w-4 h-4" /> {t('retake')}</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
