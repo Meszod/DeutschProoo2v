@@ -17,6 +17,8 @@ import {
   Star,
   Menu,
   X,
+  GraduationCap,
+  Sparkles,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -47,63 +49,77 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="relative min-h-screen flex">
+      {/* Background */}
+      <div className="flag-bg">
+        <div className="flag-glow-1" />
+        <div className="flag-glow-2" />
+      </div>
+
       {/* Sidebar */}
       <aside
-        className={`fixed lg:sticky top-0 z-40 h-screen w-64 bg-white border-r border-slate-200 flex flex-col transition-transform duration-300 ${
+        className={`fixed lg:sticky top-0 z-40 h-screen w-64 bg-white/80 backdrop-blur-xl border-r border-slate-200/60 flex flex-col transition-transform duration-300 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        <div className="px-6 py-5 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-sky-700 flex items-center justify-center text-white font-bold text-lg">
-              D
+        <div className="px-6 py-5 border-b border-slate-200/60">
+          <NavLink to="/dashboard" className="flex items-center gap-2.5 group">
+            <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-lg shadow-brand-500/30 group-hover:scale-105 transition-transform">
+              <GraduationCap className="w-5 h-5" />
             </div>
             <div>
               <h1 className="font-display text-lg font-bold text-slate-900 leading-none">DeutschPro</h1>
-              <p className="text-[11px] text-slate-400 mt-0.5">Imtihon platformasi</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">{t('tagline')}</p>
             </div>
-          </div>
+          </NavLink>
         </div>
 
         <nav className="flex-1 overflow-y-auto scrollbar-thin px-3 py-4 space-y-0.5">
-          {items.map((item) => {
+          {items.map((item, idx) => {
             const Icon = item.icon;
             return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 onClick={() => setMobileOpen(false)}
+                style={{ animationDelay: `${idx * 0.03}s` }}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                  `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 animate-slide-down relative group ${
                     isActive
-                      ? 'bg-sky-50 text-sky-700'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-gradient-to-r from-brand-50 to-transparent text-brand-700'
+                      : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
                   }`
                 }
               >
-                <Icon className="w-[18px] h-[18px]" />
-                <span>{t(item.key)}</span>
-                {item.to === '/admin' && (
-                  <span className="ml-auto badge bg-amber-100 text-amber-700">Admin</span>
+                {({ isActive }) => (
+                  <>
+                    {isActive && (
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-brand-500 rounded-r-full" />
+                    )}
+                    <Icon className={`w-[18px] h-[18px] transition-transform group-hover:scale-110 ${isActive ? 'text-brand-600' : ''}`} />
+                    <span>{t(item.key)}</span>
+                    {item.to === '/admin' && (
+                      <span className="ml-auto badge bg-amber-100 text-amber-700 border border-amber-200/50">Admin</span>
+                    )}
+                  </>
                 )}
               </NavLink>
             );
           })}
         </nav>
 
-        <div className="px-3 py-4 border-t border-slate-100">
+        <div className="px-3 py-4 border-t border-slate-200/60">
           {profile && (
             <div className="flex items-center gap-2 mb-3 px-3">
-              <div className="badge bg-orange-50 text-orange-600">
+              <div className="badge bg-orange-50 text-orange-600 border border-orange-100/80">
                 <Flame className="w-3.5 h-3.5" /> {profile.current_streak}
               </div>
-              <div className="badge bg-sky-50 text-sky-600">
+              <div className="badge bg-brand-50 text-brand-600 border border-brand-100/80">
                 <Star className="w-3.5 h-3.5" /> {profile.total_points}
               </div>
             </div>
           )}
-          <button onClick={handleLogout} className="btn-ghost w-full justify-start text-slate-500">
+          <button onClick={handleLogout} className="btn-ghost w-full justify-start text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors">
             <LogOut className="w-[18px] h-[18px]" />
             {t('logout')}
           </button>
@@ -111,12 +127,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 bg-black/30 z-30 lg:hidden" onClick={() => setMobileOpen(false)} />
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-30 lg:hidden animate-fade-in" onClick={() => setMobileOpen(false)} />
       )}
 
       {/* Main */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-slate-200 px-4 lg:px-8 py-3 flex items-center justify-between">
+      <div className="flex-1 min-w-0 flex flex-col relative z-10">
+        <header className="sticky top-0 z-20 bg-white/70 backdrop-blur-xl border-b border-slate-200/60 px-4 lg:px-8 py-3 flex items-center justify-between">
           <button
             className="lg:hidden btn-ghost px-2"
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -124,13 +140,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-          <div className="hidden lg:block">
+          <div className="hidden lg:flex items-center gap-2">
             {profile?.target_level && (
               <span className="text-sm text-slate-500">
                 {t('level')}: <span className="font-semibold text-slate-800">{profile.target_level}</span>
                 {profile.target_exam_type && (
                   <>
-                    {' · '}
+                    <span className="text-slate-300 mx-1.5">·</span>
                     <span className="font-semibold text-slate-800">{profile.target_exam_type}</span>
                   </>
                 )}
@@ -139,11 +155,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex items-center gap-3">
             {profile?.exam_date && (
-              <span className="badge bg-emerald-50 text-emerald-700">
+              <span className="badge bg-emerald-50 text-emerald-700 border border-emerald-100/80">
+                <Sparkles className="w-3 h-3" />
                 {Math.max(0, Math.ceil((new Date(profile.exam_date).getTime() - Date.now()) / 86400000))} {t('daysLeft')}
               </span>
             )}
-            <div className="w-9 h-9 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center text-sm font-semibold">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center text-sm font-semibold shadow-md">
               {(profile?.full_name || '?').charAt(0).toUpperCase()}
             </div>
           </div>

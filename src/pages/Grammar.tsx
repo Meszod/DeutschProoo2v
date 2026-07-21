@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import { SpellCheck, Check, X, ArrowRight, RotateCcw } from 'lucide-react';
+import { SpellCheck, Check, X, ArrowRight, RotateCcw, Zap } from 'lucide-react';
+
+const ACCENT = '#14b8a6';
 
 interface GrammarExercise {
   type: 'article' | 'case' | 'tense' | 'fill_blank';
@@ -56,26 +58,22 @@ export default function Grammar() {
   }
 
   function restart() {
-    setIdx(0);
-    setSelected(null);
-    setChecked(false);
-    setCorrectCount(0);
-    setFinished(false);
+    setIdx(0); setSelected(null); setChecked(false); setCorrectCount(0); setFinished(false);
   }
 
   if (finished) {
+    const pct = Math.round((correctCount / EXERCISES.length) * 100);
+    const passed = pct >= 60;
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="card p-8 text-center">
-          <div className="w-20 h-20 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4">
-            <SpellCheck className="w-8 h-8" />
+        <div className="card p-8 text-center relative overflow-hidden animate-scale-in">
+          <div className={`absolute -top-12 left-1/2 -translate-x-1/2 w-40 h-40 rounded-full blur-3xl opacity-30 ${passed ? 'bg-emerald-300' : 'bg-red-300'}`} />
+          <div className={`relative w-20 h-20 rounded-full mx-auto flex items-center justify-center mb-4 ${passed ? 'bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-lg shadow-emerald-500/30' : 'bg-gradient-to-br from-red-400 to-rose-500 text-white shadow-lg shadow-red-500/30'}`}>
+            <SpellCheck className="w-9 h-9" />
           </div>
-          <h2 className="text-2xl font-bold text-slate-900">{correctCount} / {EXERCISES.length}</h2>
+          <h2 className="font-display text-3xl font-bold text-slate-900">{correctCount} / {EXERCISES.length}</h2>
           <p className="text-slate-500 mt-1">{t('score')}</p>
-          <button onClick={restart} className="btn-primary mt-6">
-            <RotateCcw className="w-4 h-4" />
-            {t('start')}
-          </button>
+          <button onClick={restart} className="btn-primary mt-6"><RotateCcw className="w-4 h-4" /> {t('start')}</button>
         </div>
       </div>
     );
@@ -83,9 +81,9 @@ export default function Grammar() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-          <SpellCheck className="w-5 h-5" />
+      <div className="flex items-center gap-3 animate-slide-down">
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: `${ACCENT}15`, color: ACCENT, boxShadow: `0 4px 14px ${ACCENT}25` }}>
+          <SpellCheck className="w-6 h-6" />
         </div>
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900">{t('grammar')}</h1>
@@ -93,21 +91,16 @@ export default function Grammar() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-slate-500">
-          {t('question')} {idx + 1} {t('of')} {EXERCISES.length}
-        </span>
-        <span className="badge bg-slate-100 text-slate-600 capitalize">{ex.type.replace('_', ' ')}</span>
+      <div className="flex items-center justify-between animate-slide-down">
+        <span className="text-sm text-slate-500">{t('question')} {idx + 1} {t('of')} {EXERCISES.length}</span>
+        <span className="badge bg-teal-50 text-teal-600 border border-teal-100/80 capitalize">{ex.type.replace('_', ' ')}</span>
       </div>
 
-      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-teal-500 rounded-full transition-all"
-          style={{ width: `${((idx + 1) / EXERCISES.length) * 100}%` }}
-        />
+      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${((idx + 1) / EXERCISES.length) * 100}%`, background: `linear-gradient(90deg, ${ACCENT}, #0d9488)` }} />
       </div>
 
-      <div className="card p-6">
+      <div className="card p-6 animate-slide-up">
         <p className="text-lg font-medium text-slate-900 mb-6">{ex.question}</p>
         <div className="space-y-2.5">
           {ex.options?.map((opt, i) => {
@@ -120,12 +113,7 @@ export default function Grammar() {
               style = 'border-teal-500 bg-teal-50 text-teal-700';
             }
             return (
-              <button
-                key={i}
-                disabled={checked}
-                onClick={() => setSelected(i)}
-                className={`w-full text-left px-4 py-3 rounded-xl border transition-colors text-sm font-medium ${style}`}
-              >
+              <button key={i} disabled={checked} onClick={() => setSelected(i)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all text-sm font-medium ${style} hover:scale-[1.01] active:scale-[0.99]`}>
                 <span className="flex items-center justify-between">
                   {opt}
                   {checked && i === ex.answer && <Check className="w-4 h-4" />}
@@ -137,19 +125,14 @@ export default function Grammar() {
         </div>
 
         {checked && (
-          <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
-            <p className="text-sm text-slate-600">
-              <span className="font-semibold">{t('explanation')}: </span>
-              {ex.explanation}
-            </p>
+          <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-100 animate-slide-down">
+            <p className="text-sm text-slate-600"><span className="font-semibold">{t('explanation')}: </span>{ex.explanation}</p>
           </div>
         )}
 
         <div className="mt-5">
           {!checked ? (
-            <button onClick={check} disabled={selected === null} className="btn-primary w-full">
-              {t('check')}
-            </button>
+            <button onClick={check} disabled={selected === null} className="btn-primary w-full">{t('check')}</button>
           ) : (
             <button onClick={next} className="btn-primary w-full">
               {idx < EXERCISES.length - 1 ? t('next') : t('finish')}
