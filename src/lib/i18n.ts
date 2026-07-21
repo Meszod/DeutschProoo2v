@@ -165,6 +165,7 @@ export const translations = {
     feature6: 'Progress kuzatuvi va statistika',
     ctaTitle: 'Bugun mashqni boshlang',
     ctaSubtitle: 'Bepul ro\'yxatdan o\'ting va daraja aniqlash testidan o\'ting',
+    rememberMe: 'Meni eslab qol',
   },
   ru: {
     appName: 'DeutschPro',
@@ -330,6 +331,7 @@ export const translations = {
     feature6: 'Отслеживание прогресса и статистика',
     ctaTitle: 'Начните тренироваться сегодня',
     ctaSubtitle: 'Зарегистрируйтесь бесплатно и пройдите тест на уровень',
+    rememberMe: 'Запомнить меня',
   },
   en: {
     appName: 'DeutschPro',
@@ -495,6 +497,7 @@ export const translations = {
     feature6: 'Progress tracking and statistics',
     ctaTitle: 'Start practicing today',
     ctaSubtitle: 'Sign up free and take the placement test',
+    rememberMe: 'Remember me',
   },
 } as const;
 

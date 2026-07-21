@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
@@ -10,10 +10,22 @@ export default function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isSignup = mode === 'signup';
+
+  useEffect(() => {
+    if (!isSignup) {
+      const saved = localStorage.getItem('rememberMe');
+      if (saved === 'true') {
+        const savedEmail = localStorage.getItem('savedEmail');
+        if (savedEmail) setEmail(savedEmail);
+        setRememberMe(true);
+      }
+    }
+  }, [isSignup]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,6 +51,13 @@ export default function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
         }
         navigate('/onboarding');
       } else {
+        if (rememberMe) {
+          localStorage.setItem('rememberMe', 'true');
+          localStorage.setItem('savedEmail', email);
+        } else {
+          localStorage.removeItem('rememberMe');
+          localStorage.removeItem('savedEmail');
+        }
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         if (data.session) {
@@ -60,14 +79,19 @@ export default function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-md">
+    <div className="relative min-h-screen flex items-center justify-center bg-slate-50 px-4 overflow-hidden">
+      <div className="flag-bg">
+        <div className="flag-glow-1" />
+        <div className="flag-glow-2" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-md">
         <Link to="/" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 mb-8 text-sm">
           <ArrowLeft className="w-4 h-4" />
           {t('home')}
         </Link>
 
-        <div className="card p-8">
+        <div className="card p-8 backdrop-blur-xl bg-white/90 shadow-xl">
           <div className="flex items-center gap-2 mb-6">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-sky-700 flex items-center justify-center text-white font-bold text-lg">
               D
@@ -129,6 +153,18 @@ export default function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
                 />
               </div>
             </div>
+
+            {!isSignup && (
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                <span className="text-sm text-slate-600">{t('rememberMe')}</span>
+              </label>
+            )}
 
             <button type="submit" disabled={loading} className="btn-primary w-full">
               {loading ? t('loading') : isSignup ? t('signup') : t('login')}
