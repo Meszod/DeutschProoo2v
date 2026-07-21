@@ -1,9 +1,26 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+
+interface TaskRequest {
+  skill: "lesen" | "hoeren" | "schreiben" | "sprechen";
+  level: "A1" | "A2" | "B1" | "B2" | "C1";
+  topic?: string;
+}
+
+const SYSTEM_PROMPTS: Record<string, string> = {
+  lesen: `You are a German exam expert. Generate a reading comprehension task in Goethe/telc format. Return JSON with: title (string), text (German passage, 150-300 words depending on level), questions (array of {id, question, options[4], correct_index}). Match difficulty to the given CEFR level.`,
+  hoeren: `You are a German exam expert. Generate a listening task. Return JSON with: title (string), transcript (German text to be read aloud, 100-250 words), questions (array of {id, question, options[4], correct_index}). Match difficulty to the given CEFR level.`,
+  schreiben: `You are a German exam expert. Generate a writing task. Return JSON with: title (string), prompt (German writing prompt with instructions, word count requirement, and situation context), min_words (number), max_words (number), assessment_criteria (array of {criterion, description}). Match difficulty to the given CEFR level.`,
+  sprechen: `You are a German exam expert. Generate a speaking task. Return JSON with: title (string), prompt (German speaking prompt with situation, role, and task description), preparation_time (seconds), speaking_time (seconds), assessment_criteria (array of {criterion, description}). Match difficulty to the given CEFR level.`,
 };
 
 Deno.serve(async (req: Request) => {
@@ -12,128 +29,95 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { skill, level } = await req.json();
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-
-    if (!apiKey) {
-      return new Response(
-        JSON.stringify({
-          error: "ANTHROPIC_API_KEY not configured. Set it as a Supabase secret.",
-          hint: "Go to Supabase Dashboard > Edge Functions > Secrets and add ANTHROPIC_API_KEY",
-        }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Missing authorization" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const prompts: Record<string, string> = {
-      lesen: `Erstelle eine originale deutsche Lesetext-Aufgabe für das Niveau ${level} im Goethe-Zertifikat Format.
-Der Text soll original sein (kein Copy von echten Prüfungen), aber Format und Schwierigkeit sollen passen.
-Antworte NUR mit einem JSON-Objekt mit folgender Struktur:
-{
-  "title": "Kurzer Titel",
-  "content": {
-    "text": "Der deutsche Text (ca. 150-250 Wörter für B1)",
-    "questions": [
-      {"type": "multiple_choice", "question": "Frage auf Deutsch", "options": ["A","B","C","D"], "answer": 0, "explanation": "Erklärung"},
-      {"type": "true_false", "question": "Aussage", "answer": true, "explanation": "Erklärung"}
-    ]
-  }
-}
-Mindestens 4 Fragen. Der "answer" Index ist 0-basiert.`,
-      hoeren: `Erstelle eine originale deutsche Hören-Aufgabe für das Niveau ${level}.
-Antworte NUR mit JSON:
-{
-  "title": "Titel",
-  "content": {
-    "audio_script": "Deutscher Text zum Vorlesen (ca. 100-200 Wörter)",
-    "questions": [
-      {"type": "multiple_choice", "question": "Frage", "options": ["A","B","C"], "answer": 0, "explanation": "Erklärung"}
-    ]
-  }
-}
-Mindestens 4 Fragen.`,
-      schreiben: `Erstelle eine originale Schreiben-Aufgabe für ${level} im Goethe-Format.
-Antworte NUR mit JSON:
-{
-  "title": "Titel",
-  "content": {
-    "prompt": "Aufgabenbeschreibung auf Deutsch",
-    "leitpunkte": ["Punkt 1", "Punkt 2", "Punkt 3", "Punkt 4"],
-    "min_words": 80,
-    "max_words": 120
-  }
-}`,
-      sprechen: `Erstelle eine originale Sprechen-Aufgabe für ${level}.
-Antworte NUR mit JSON:
-{
-  "title": "Titel",
-  "content": {
-    "prompt": "Aufgabenbeschreibung",
-    "leitpunkte": ["Punkt 1", "Punkt 2", "Punkt 3"],
-    "min_duration_seconds": 90,
-    "max_duration_seconds": 150
-  }
-}`,
-    };
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
 
-    const prompt = prompts[skill] || prompts.lesen;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const body: TaskRequest = await req.json();
+    const { skill, level, topic } = body;
+
+    if (!skill || !level) {
+      return new Response(JSON.stringify({ error: "skill and level are required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!ANTHROPIC_API_KEY) {
+      return new Response(JSON.stringify({ error: "AI service not configured" }), {
+        status: 503,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const systemPrompt = SYSTEM_PROMPTS[skill] || SYSTEM_PROMPTS.lesen;
+    const userMessage = topic
+      ? `Generate a ${level} level ${skill} task about: ${topic}. Return ONLY valid JSON, no markdown.`
+      : `Generate a ${level} level ${skill} task. Return ONLY valid JSON, no markdown.`;
+
+    const response = await fetch(ANTHROPIC_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
+        "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: "claude-3-5-haiku-20241022",
         max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      return new Response(
-        JSON.stringify({ error: `Anthropic API error: ${response.status}`, details: errText }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+      return new Response(JSON.stringify({ error: "AI request failed", details: errText }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const data = await response.json();
-    const text = data.content?.[0]?.text || "";
+    const aiData = await response.json();
+    const content = aiData.content?.[0]?.text || "";
 
-    // Try to parse JSON from the response
-    let taskData;
+    let task;
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      taskData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+      task = JSON.parse(content);
     } catch {
-      return new Response(
-        JSON.stringify({ error: "Could not parse AI response as JSON", raw: text }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        task = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("Invalid JSON from AI");
+      }
     }
 
-    return new Response(JSON.stringify(taskData), {
+    return new Response(JSON.stringify({ task }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err.message || "Internal error" }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: "Internal error", details: String(err) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
